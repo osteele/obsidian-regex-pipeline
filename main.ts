@@ -1,4 +1,4 @@
-import { App, BaseComponent, ButtonComponent, Component, EventRef, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TextAreaComponent, TextComponent, TFile, Vault, Command, Editor, Hotkey, setIcon } from 'obsidian';
+import { App, BaseComponent, ButtonComponent, Component, EventRef, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TextAreaComponent, TextComponent, TFile, Vault, Command, Editor, Hotkey, setIcon, FileSystemAdapter } from 'obsidian';
 
 class RuleConfig {
 	name: string;
@@ -535,8 +535,11 @@ class ORPSettings extends PluginSettingTab {
 		ruleItem.setAttribute('data-index', String(index));
 		ruleItem.setAttribute('draggable', 'true');
 
-		// Add a class if this is a Quick Command ruleset
-		if (index < this.plugin.configs.quickCommands && rule.enabled) {
+		// Determine if this is a Quick Command ruleset by counting enabled rules before this one
+		const enabledRulesBefore = this.plugin.rulesetIndex.rules.slice(0, index).filter(r => r.enabled).length;
+		const isQuickCommand = rule.enabled && enabledRulesBefore < this.plugin.configs.quickCommands;
+
+		if (isQuickCommand) {
 			ruleItem.addClass('regex-pipeline-quick-command');
 		}
 
@@ -634,7 +637,7 @@ class ORPSettings extends PluginSettingTab {
 		}
 
 		// Add Quick Command indicator if this is one of the first N enabled rulesets
-		if (index < this.plugin.configs.quickCommands && rule.enabled) {
+		if (isQuickCommand) {
 			const quickCommandIndicator = ruleItem.createEl('div', { text: 'QC' });
 			quickCommandIndicator.addClass('regex-pipeline-quick-command-indicator');
 			quickCommandIndicator.setAttr('title', 'This ruleset is available as a Quick Command');
@@ -655,17 +658,14 @@ class ORPSettings extends PluginSettingTab {
 
 	// Helper function to open the file in system file explorer
 	showInFileExplorer(filePath: string) {
-		// Get the full path from Obsidian's adapter using getResourcePath method
-		// This returns a URI that we need to convert to a file system path
-		const resourcePath = this.app.vault.adapter.getResourcePath(filePath);
-		// Convert the resource path to a file system path by decoding the URI
-		const fullPath = decodeURIComponent(resourcePath.replace(/^app:\/\/local\//, '').split('?')[0]);
-		
 		// Use Electron's shell to show the file in the system file explorer
-		// @ts-ignore - We're using Electron API which might not be directly available in the typings
 		if (require) {
 			try {
 				const { shell } = require('electron');
+				const path = require('path');
+				// Use getFullPath to get the absolute path
+				const adapter = this.app.vault.adapter as FileSystemAdapter;
+				const fullPath = adapter.getFullPath(filePath);
 				shell.showItemInFolder(fullPath);
 				return true;
 			} catch (error) {
@@ -714,8 +714,7 @@ class ApplyRuleSetMenu extends Modal {
 	}
 
 	onOpen() {
-		for (let i = 0; i < this.plugin.rules.length; i++)
-		{
+		for (let i = 0; i < this.plugin.rules.length; i++) {
 			// new Setting(contentEl)
 			// 	.setName(this.plugin.rules[i])
 			// 	.addButton(btn => btn.onClick(async () => {
@@ -741,7 +740,7 @@ class ApplyRuleSetMenu extends Modal {
 	}
 
 	onClose() {
-		let {contentEl} = this;
+		let { contentEl } = this;
 		contentEl.empty();
 	}
 }

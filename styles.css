@@ -95,7 +95,9 @@
 }
 
 .regex-pipeline-toggle-container button {
-    background: none;
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
     padding: 4px;
     margin: 0;
 }
