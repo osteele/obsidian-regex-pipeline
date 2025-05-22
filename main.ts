@@ -420,20 +420,22 @@ class ORPSettings extends PluginSettingTab {
 			}) 
 		new Setting(this.containerEl)
 			.setName("Quick Rule Commands")
-			.setDesc("The first N rulesets in your index file will be available as Obsidian commands. When changing this count or re-ordering rules, existing commands will not be removed until next reload (You can also manually re-enable the plugin).")
+			.setDesc("The first N rulesets in your index file will be available as Obsidian commands. When changing this count or re-ordering rulesets, existing commands will not be removed until next reload (You can also manually re-enable the plugin).")
 			.addSlider(c => {
 				c.setValue(this.plugin.configs.quickCommands)
 				c.setLimits(0, 10, 1)
 				c.setDynamicTooltip()
 				c.showTooltip()
-				c.onChange((v) => {
+				c.onChange(async (v) => {
 					this.plugin.configs.quickCommands = v;
 					this.plugin.updateQuickCommands();
+					// Update the UI to refresh the Quick Command indicators
+					await this.refreshRules();
 				})
 			}) 
 		new Setting(this.containerEl)
-			.setName("Save Rules In Vault")
-			.setDesc("Reads rulesets from \".obsidian/regex-rulesets\" when off, \"./regex-ruleset\" when on (useful if you are user of ObsidianSync). ")
+			.setName("Save Ruleset Index In Vault")
+			.setDesc("Reads the ruleset index from \".obsidian/regex-rulesets\" when off, \"./regex-ruleset\" when on (useful if you are user of ObsidianSync). ")
 			.addToggle(c => {
 				c.setValue(this.plugin.configs.rulesInVault)
 				c.onChange(v => {
@@ -443,29 +445,26 @@ class ORPSettings extends PluginSettingTab {
 				})
 			})
 
-		// Rule list management section
-		this.containerEl.createEl('h2', { text: 'Rule Management' });
-		const desc = this.containerEl.createEl('p', { text: 'Manage rule files in the index. Disabled rules (commented with #) will not be applied in menus and commands.' });
+		// Ruleset list management section
+		this.containerEl.createEl('h2', { text: 'Ruleset Management' });
+		const desc = this.containerEl.createEl('p', { text: 'Manage rulesets in the index. Disabled rulesets will not be applied in menus and commands.' });
 		desc.style.opacity = '0.7';
 
-		// Container for the rule list
+		// Container for the ruleset list
 		this.ruleListContainer = this.containerEl.createEl('div');
 		this.ruleListContainer.addClass('regex-pipeline-rule-list');
 
-		// Container for rules not in the index
+		// Container for rulesets not in the index
 		this.nonListedRuleContainer = this.containerEl.createEl('div');
-		this.containerEl.createEl('h3', { text: 'Unlisted Rules' });
-		const unlDesc = this.containerEl.createEl('p', { text: 'Files in the rules directory that are not in the index.' });
-		unlDesc.style.opacity = '0.7';
 
 		// Refresh button
 		const refreshContainer = this.containerEl.createEl('div');
 		refreshContainer.addClass('regex-pipeline-refresh-container');
 		const refreshButton = new ButtonComponent(refreshContainer);
-		refreshButton.setButtonText('Refresh Rules');
+		refreshButton.setButtonText('Refresh Rulesets');
 		refreshButton.onClick(() => this.refreshRules());
 
-		// Render the rule list
+		// Render the ruleset list
 		await this.refreshRules();
 	}
 
@@ -477,18 +476,41 @@ class ORPSettings extends PluginSettingTab {
 		this.ruleListContainer.empty();
 		this.nonListedRuleContainer.empty();
 
-		// Render each rule in the index
-		this.plugin.rulesetIndex.rules.forEach((rule, index) => {
-			this.renderRuleItem(rule, index);
-		});
+		// Special case for when there's no index.txt or the file is empty
+		if (this.plugin.rulesetIndex.rules.length === 0) {
+			const emptyMessage = this.ruleListContainer.createEl('div', {
+				text: 'No rulesets found in index file. Create a ruleset or add existing files to the index.'
+			});
+			emptyMessage.addClass('regex-pipeline-empty-message');
 
-		// Render rules not in the index
+			// Add button to create a new ruleset
+			const createButton = new ButtonComponent(this.ruleListContainer);
+			createButton.setButtonText('Create New Ruleset');
+			createButton.buttonEl.addClass('regex-pipeline-create-button');
+			createButton.onClick(() => {
+				new NewRulesetPanel(this.app, this.plugin).open();
+			});
+		} else {
+			// Render each ruleset in the index
+			this.plugin.rulesetIndex.rules.forEach((rule, index) => {
+				this.renderRuleItem(rule, index);
+			});
+		}
+
+		// Render rulesets not in the index
 		const indexedRuleNames = this.plugin.rulesetIndex.rules.map(r => r.name);
 		const nonIndexedRules = this.plugin.allRuleFiles.filter(file => !indexedRuleNames.includes(file));
-		
-		if (nonIndexedRules.length === 0) {
-			this.nonListedRuleContainer.createEl('p', { text: 'All rule files are in the index.' });
-		} else {
+
+		// Only show the unlisted rulesets section if there are any
+		if (nonIndexedRules.length > 0) {
+			// First create the heading and description
+			this.containerEl.createEl('h3', { text: 'Unlisted Rulesets' });
+			const unlDesc = this.containerEl.createEl('p', {
+				text: 'Files in the rulesets directory that are not in the index.'
+			});
+			unlDesc.style.opacity = '0.7';
+
+			// Then render the unlisted rulesets
 			nonIndexedRules.forEach(file => {
 				const fileItem = this.nonListedRuleContainer.createEl('div');
 				fileItem.addClass('regex-pipeline-rule-item');
@@ -513,6 +535,11 @@ class ORPSettings extends PluginSettingTab {
 		ruleItem.setAttribute('data-index', String(index));
 		ruleItem.setAttribute('draggable', 'true');
 
+		// Add a class if this is a Quick Command ruleset
+		if (index < this.plugin.configs.quickCommands && rule.enabled) {
+			ruleItem.addClass('regex-pipeline-quick-command');
+		}
+
 		// Handle drag events
 		ruleItem.addEventListener('dragstart', (e) => {
 			this.dragging = true;
@@ -534,7 +561,7 @@ class ORPSettings extends PluginSettingTab {
 			ruleItem.removeClass('drag-over');
 
 			if (this.dragging && this.draggedIndex !== index) {
-				// Move the rule in the index
+				// Move the ruleset in the index
 				this.plugin.rulesetIndex.moveRule(this.draggedIndex, index);
 
 				// Update the rules array
@@ -571,7 +598,7 @@ class ORPSettings extends PluginSettingTab {
 		toggle.setTooltip(rule.enabled ? 'Disable' : 'Enable');
 		toggle.buttonEl.addClass(rule.enabled ? 'regex-pipeline-enabled' : 'regex-pipeline-disabled');
 		toggle.onClick(async () => {
-			// Toggle the rule's enabled state
+			// Toggle the ruleset's enabled state
 			rule.enabled = !rule.enabled;
 
 			// Update the rules array
@@ -590,9 +617,12 @@ class ORPSettings extends PluginSettingTab {
 			// Update menus and commands
 			this.plugin.updateRightclickMenu();
 			this.plugin.updateQuickCommands();
+
+			// Refresh the UI to update Quick Command indicators
+			await this.refreshRules();
 		});
 
-		// Rule name
+		// Ruleset name
 		const nameEl = ruleItem.createEl('span', { text: rule.name });
 		nameEl.addClass('regex-pipeline-rule-name');
 
@@ -600,7 +630,52 @@ class ORPSettings extends PluginSettingTab {
 		const fileExists = this.plugin.allRuleFiles.includes(rule.name);
 		if (!fileExists) {
 			nameEl.addClass('regex-pipeline-missing-file');
-			nameEl.setAttr('title', 'File not found in rules directory');
+			nameEl.setAttr('title', 'File not found in rulesets directory');
+		}
+
+		// Add Quick Command indicator if this is one of the first N enabled rulesets
+		if (index < this.plugin.configs.quickCommands && rule.enabled) {
+			const quickCommandIndicator = ruleItem.createEl('div', { text: 'QC' });
+			quickCommandIndicator.addClass('regex-pipeline-quick-command-indicator');
+			quickCommandIndicator.setAttr('title', 'This ruleset is available as a Quick Command');
+		}
+
+		// Add "Show in Explorer" button only if the file exists
+		if (fileExists) {
+			const showInExplorerButton = new ButtonComponent(ruleItem);
+			showInExplorerButton.setIcon('lucide-folder');
+			showInExplorerButton.setTooltip('Show in File Explorer');
+			showInExplorerButton.buttonEl.addClass('regex-pipeline-explorer-button');
+			showInExplorerButton.onClick(() => {
+				const filePath = this.plugin.pathToRulesets + '/' + rule.name;
+				this.showInFileExplorer(filePath);
+			});
+		}
+	}
+
+	// Helper function to open the file in system file explorer
+	showInFileExplorer(filePath: string) {
+		// Get the full path from Obsidian's adapter using getResourcePath method
+		// This returns a URI that we need to convert to a file system path
+		const resourcePath = this.app.vault.adapter.getResourcePath(filePath);
+		// Convert the resource path to a file system path by decoding the URI
+		const fullPath = decodeURIComponent(resourcePath.replace(/^app:\/\/local\//, '').split('?')[0]);
+		
+		// Use Electron's shell to show the file in the system file explorer
+		// @ts-ignore - We're using Electron API which might not be directly available in the typings
+		if (require) {
+			try {
+				const { shell } = require('electron');
+				shell.showItemInFolder(fullPath);
+				return true;
+			} catch (error) {
+				console.error("Failed to open file in explorer:", error);
+				new Notice("Failed to open file in explorer");
+				return false;
+			}
+		} else {
+			new Notice("Cannot open file in explorer in this environment");
+			return false;
 		}
 	}
 
